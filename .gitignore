@@ -1,6 +1,11 @@
 node_modules
 /out
+agent/generatedImages
+agent/content_cache
+packages/debug_audio
 
+# Ignore all .env files in the root directory
+.env.*
 .env
 .env.production
 .env.local
