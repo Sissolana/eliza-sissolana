@@ -299,11 +299,12 @@ export class TranscriptionService
             fs.writeFileSync(tempWavFile, convertedBuffer);
 
             elizaLogger.debug(`Temporary WAV file created: ${tempWavFile}`);
+            elizaLogger.log(`Temporary WAV file created: ${tempWavFile}`);
 
             let output = await nodewhisper(tempWavFile, {
                 modelName: "base.en",
                 autoDownloadModelName: "base.en",
-                verbose: false,
+                verbose: true,
                 removeWavFileAfterTranscription: false,
                 withCuda: this.isCudaAvailable,
                 whisperOptions: {
@@ -317,6 +318,8 @@ export class TranscriptionService
                     // splitOnWord: true,
                 },
             });
+
+            elizaLogger.log(`After Temporary WAV file nodewhisper`);
 
             output = output
                 .split("\n")
@@ -335,6 +338,8 @@ export class TranscriptionService
                 elizaLogger.log("Output is null or too short, returning null");
                 return null;
             }
+
+            elizaLogger.log(`Temporary WAV file output: ${output}`);
             return output;
         } catch (error) {
             elizaLogger.error(

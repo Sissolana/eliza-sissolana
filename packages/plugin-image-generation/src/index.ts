@@ -28,7 +28,7 @@ export function saveBase64Image(base64Data: string, filename: string): string {
 
     // Create full file path
     const filepath = path.join(imageDir, `${filename}.png`);
-
+    console.log("File path at plugin image generation", filepath);
     // Save the file
     fs.writeFileSync(filepath, imageBuffer);
 
@@ -44,22 +44,44 @@ export async function saveHeuristImage(
         fs.mkdirSync(imageDir, { recursive: true });
     }
 
-    // Fetch image from URL
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch image: ${response.statusText}`);
+    try {
+        // Fetch image from URL
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+            elizaLogger.error(`Failed to fetch image: ${response.statusText}`);
+            elizaLogger.error("Response status:", response.status);
+            // Convert headers to a plain object in a type-safe way
+            const headers: Record<string, string> = {};
+            response.headers.forEach((value, key) => {
+                headers[key] = value;
+            });
+            elizaLogger.error("Response headers:", JSON.stringify(headers));
+            elizaLogger.error("Response text:", await response.text());
+            throw new Error(
+                `Failed to fetch image: ${response.statusText} (${response.status})`
+            );
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const imageBuffer = Buffer.from(arrayBuffer);
+
+        // Create full file path
+        const filepath = path.join(imageDir, `${filename}.png`);
+
+        // Save the file
+        fs.writeFileSync(filepath, imageBuffer);
+        elizaLogger.log(`Saved image to: ${filepath}`);
+
+        return filepath;
+    } catch (error) {
+        elizaLogger.error("Error in saveHeuristImage:", {
+            name: error?.name,
+            message: error?.message,
+            stack: error?.stack,
+            cause: error?.cause,
+        });
+        throw error;
     }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const imageBuffer = Buffer.from(arrayBuffer);
-
-    // Create full file path
-    const filepath = path.join(imageDir, `${filename}.png`);
-
-    // Save the file
-    fs.writeFileSync(filepath, imageBuffer);
-
-    return filepath;
 }
 
 const imageGeneration: Action = {
@@ -110,7 +132,7 @@ const imageGeneration: Action = {
             modelId?: string;
             jobId?: string;
         },
-        callback: HandlerCallback
+        callback?: HandlerCallback
     ) => {
         elizaLogger.log("Composing state for message:", message);
         state = (await runtime.composeState(message)) as State;
@@ -120,107 +142,75 @@ const imageGeneration: Action = {
         const imagePrompt = message.content.text;
         elizaLogger.log("Image prompt received:", imagePrompt);
 
-        // TODO: Generate a prompt for the image
-
-        const res: { image: string; caption: string }[] = [];
-
-        elizaLogger.log("Generating image with prompt:", imagePrompt);
-        const images = await generateImage(
-            {
-                prompt: imagePrompt,
-                width: options.width || 1024,
-                height: options.height || 1024,
-                ...(options.count != null ? { count: options.count || 1 } : {}),
-                ...(options.negativePrompt != null
-                    ? { negativePrompt: options.negativePrompt }
-                    : {}),
-                ...(options.numIterations != null
-                    ? { numIterations: options.numIterations }
-                    : {}),
-                ...(options.guidanceScale != null
-                    ? { guidanceScale: options.guidanceScale }
-                    : {}),
-                ...(options.seed != null ? { seed: options.seed } : {}),
-                ...(options.modelId != null
-                    ? { modelId: options.modelId }
-                    : {}),
-                ...(options.jobId != null ? { jobId: options.jobId } : {}),
-            },
-            runtime
-        );
-
-        if (images.success && images.data && images.data.length > 0) {
-            elizaLogger.log(
-                "Image generation successful, number of images:",
-                images.data.length
+        try {
+            elizaLogger.log("Generating image with prompt:", imagePrompt);
+            const images = await generateImage(
+                {
+                    prompt: imagePrompt,
+                    width: 1024,
+                    height: 1024,
+                    count: 1,
+                },
+                runtime
             );
-            for (let i = 0; i < images.data.length; i++) {
-                const image = images.data[i];
 
-                // Save the image and get filepath
-                const filename = `generated_${Date.now()}_${i}`;
-
-                // Choose save function based on image data format
-                const filepath = image.startsWith("http")
-                    ? await saveHeuristImage(image, filename)
-                    : saveBase64Image(image, filename);
-
-                elizaLogger.log(`Processing image ${i + 1}:`, filename);
-
-                //just dont even add a caption or a description just have it generate & send
-                /*
-                try {
-                    const imageService = runtime.getService(ServiceType.IMAGE_DESCRIPTION);
-                    if (imageService && typeof imageService.describeImage === 'function') {
-                        const caption = await imageService.describeImage({ imageUrl: filepath });
-                        captionText = caption.description;
-                        captionTitle = caption.title;
-                    }
-                } catch (error) {
-                    elizaLogger.error("Caption generation failed, using default caption:", error);
-                }*/
-
-                const _caption = "...";
-                /*= await generateCaption(
-                    {
-                        imageUrl: image,
-                    },
-                    runtime
-                );*/
-
-                res.push({ image: filepath, caption: "..." }); //caption.title });
-
+            if (images.success && images.data && images.data.length > 0) {
                 elizaLogger.log(
-                    `Generated caption for image ${i + 1}:`,
-                    "..." //caption.title
+                    "Image generation successful, number of images:",
+                    images.data.length
                 );
-                //res.push({ image: image, caption: caption.title });
 
-                callback(
-                    {
-                        text: "...", //caption.description,
+                const results = [];
+                for (let i = 0; i < images.data.length; i++) {
+                    const image = images.data[i];
+
+                    // Save the image and get filepath
+                    const filename = `generated_${Date.now()}_${i}`;
+
+                    // Choose save function based on image data format
+                    const filepath = image.startsWith("http")
+                        ? await saveHeuristImage(image, filename)
+                        : saveBase64Image(image, filename);
+
+                    elizaLogger.log(`Processing image ${i + 1}:`, filename);
+
+                    const result = {
+                        text: "...",
                         attachments: [
                             {
                                 id: crypto.randomUUID(),
                                 url: filepath,
                                 title: "Generated image",
                                 source: "imageGeneration",
-                                description: "...", //caption.title,
-                                text: "...", //caption.description,
-                                contentType: "image/png",
+                                description: "...",
+                                text: "...",
                             },
                         ],
-                    },
-                    [
-                        {
-                            attachment: filepath,
-                            name: `${filename}.png`,
-                        },
-                    ]
-                );
+                    };
+
+                    if (callback) {
+                        callback(result);
+                    }
+                    results.push(result);
+                }
+
+                // For async/await pattern
+                return {
+                    success: true,
+                    data: results[0]?.attachments[0]?.url,
+                };
             }
-        } else {
-            elizaLogger.error("Image generation failed or returned no data.");
+
+            const error = new Error("Image generation failed");
+            if (callback) {
+                callback(undefined, error);
+            }
+            throw error;
+        } catch (error) {
+            if (callback) {
+                callback(undefined, error);
+            }
+            throw error;
         }
     },
     examples: [
